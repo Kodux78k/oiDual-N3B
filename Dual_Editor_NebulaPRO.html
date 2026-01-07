@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+<title>Nebula Pro — Dual Editor</title>
+
+<!-- Feather icons -->
+<script src="https://cdn.jsdelivr.net/npm/feather-icons@4.29.0/dist/feather.min.js"></script>
+<!-- idb-keyval for IndexedDB convenience -->
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6.2.1/dist/umd.min.js"></script>
+
+<style>
+  /* --------------------------
+     Core Variables & Reset
+     -------------------------- */
+  :root{
+    --bg: #0f1114;
+    --panel: #15171a;
+    --gutter-bg: #1d2126;
+    --accent-1: #63e6ff;
+    --accent-2: #b87cff;
+    --text: #e6ebf3;
+    --muted: #9fb4c8;
+    --radius: 14px;
+    --stroke: rgba(255,255,255,0.08);
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --toolbar-height: calc(72px + env(safe-area-inset-bottom));
+    --maxw: 1200px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%; margin: 0; padding: 0; overflow-x: hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: radial-gradient(circle at 10% 10%, rgba(99,230,255,0.04), transparent 25%),
+                radial-gradient(circle at 90% 90%, rgba(184,124,255,0.04), transparent 25%),
+                #0f1114;
+    color: var(--text);
+  }
+
+  /* --------------------------
+     Layout Containers
+     -------------------------- */
+  .app {
+    position: relative; z-index: 1; margin: 0 auto; width: 100%; max-width: var(--maxw);
+    padding: calc(12px + env(safe-area-inset-top)) 12px calc(100px + env(safe-area-inset-bottom)) 12px;
+    display: flex; flex-direction: column; gap: 16px; min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px; border-radius: 16px;
+    border: 1px solid var(--stroke);
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(10px);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo-box {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(99,230,255,0.1), rgba(184,124,255,0.1));
+    display: grid; place-items: center; border: 1px solid rgba(255,255,255,0.05);
+  }
+  .title { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+  .subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    padding: 8px 16px; border-radius: 99px; border: 1px solid var(--stroke);
+    background: rgba(255,255,255,0.02); color: var(--muted);
+    font-weight: 500; font-size: 13px; cursor: pointer; white-space: nowrap;
+    transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+  }
+  .tab.active {
+    background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.2);
+  }
+
+  /* Main Panel */
+  .panel {
+    flex: 1; border-radius: var(--radius); padding: 0;
+    border: 1px solid var(--stroke); background: #131518;
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    min-height: 60vh;
+  }
+
+  /* Views */
+  .view { display: none; flex: 1; flex-direction: column; height: 100%; }
+  .view.active { display: flex; }
+
+  /* Editor & Gutter */
+  .editor-container {
+    display: grid; grid-template-columns: 48px 1fr; height: 100%;
+    position: relative; overflow: hidden;
+  }
+  .gutter {
+    background: var(--gutter-bg); color: var(--muted);
+    font-family: var(--mono); font-size: 13px; line-height: 20px;
+    padding: 12px 0; text-align: right; padding-right: 8px;
+    user-select: none; border-right: 1px solid var(--stroke);
+    overflow: hidden; opacity: 0.6;
+  }
+  .editor-scroll-area {
+    overflow: auto; padding: 12px; height: 100%; position: relative;
+  }
+  /* The editable area */
+  #code {
+    margin: 0; font-family: var(--mono); font-size: 13px; line-height: 20px;
+    color: #e6ebf3; outline: none; white-space: pre; tab-size: 2;
+    min-height: 100%;
+  }
+  /* Syntax highlighting simulation (basic) */
+  #code .tag { color: #ff7b72; }
+  #code .attr { color: #d2a8ff; }
+  #code .val { color: #a5d6ff; }
+
+  /* Preview */
+  .preview-wrap { flex: 1; display: flex; flex-direction: column; background: #fff; }
+  .preview-bar {
+    height: 40px; background: #0d1117; color: #8b949e;
+    display: flex; align-items: center; px: 12px; font-size: 12px; padding: 0 12px;
+    border-bottom: 1px solid #30363d;
+  }
+  iframe.preview { width: 100%; height: 100%; border: 0; background: #fff; }
+
+  /* Assets View */
+  .assets-view { padding: 16px; overflow-y: auto; }
+  .asset-grid { display: grid; gap: 12px; margin-top: 12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .asset-card {
+    background: rgba(255,255,255,0.03); border: 1px solid var(--stroke);
+    border-radius: 12px; padding: 10px; display: flex; align-items: center; gap: 12px;
+  }
+  .asset-thumb {
+    width: 60px; height: 60px; border-radius: 8px; background: #000;
+    object-fit: cover; display: flex; align-items: center; justify-content: center;
+    font-size: 24px; color: #555; overflow: hidden;
+  }
+  .asset-info { flex: 1; min-width: 0; }
+  .asset-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .asset-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .asset-actions { display: flex; gap: 6px; margin-top: 6px; }
+
+  /* Chips & Buttons */
+  .chip {
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.05); border: 1px solid var(--stroke);
+    color: var(--muted); cursor: pointer; transition: 0.2s;
+  }
+  .chip:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+  /* Bottom Toolbar */
+  .toolbar-bottom {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    background: rgba(15, 17, 20, 0.85); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--stroke); z-index: 100;
+  }
+  .toolbar-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1.5fr 1fr; gap: 8px; max-width: var(--maxw); margin: 0 auto;
+  }
+  .tb-btn {
+    height: 56px; border-radius: 12px; border: 1px solid var(--stroke);
+    background: linear-gradient(180deg, #1a1d21, #15171a);
+    color: var(--muted); display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 4px; font-size: 10px; font-weight: 500; cursor: pointer;
+  }
+  .tb-btn:active { transform: scale(0.96); }
+  .tb-btn.primary {
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+    color: #000; border: none; font-weight: 700;
+  }
+  .tb-icon { font-size: 20px; line-height: 1; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #0f1216; border: 1px solid var(--stroke); color: #fff;
+    padding: 10px 20px; border-radius: 30px; font-size: 13px; font-weight: 500;
+    opacity: 0; pointer-events: none; transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    z-index: 200; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 8px;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Input file hidden */
+  #hidden-input { display: none; }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Header -->
+  <header class="header">
+    <div class="brand">
+      <div class="logo-box">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      </div>
+      <div>
+        <div class="title">Nebula Pro</div>
+        <div class="subtitle">Dual Editor • v2.1</div>
+      </div>
+    </div>
+    <div class="chip" id="xp-display">Level 1</div>
+  </header>
+
+  <!-- Navigation -->
+  <nav class="tabs">
+    <div class="tab active" data-target="editor">
+      <i data-feather="code" width="14"></i> Editor
+    </div>
+    <div class="tab" data-target="preview">
+      <i data-feather="eye" width="14"></i> Preview
+    </div>
+    <div class="tab" data-target="assets">
+      <i data-feather="image" width="14"></i> Assets
+    </div>
+  </nav>
+
+  <!-- Main Workspace -->
+  <main class="panel">
+    
+    <!-- EDITOR VIEW -->
+    <div id="view-editor" class="view active">
+      <div class="editor-container">
+        <div class="gutter" id="gutter">1</div>
+        <div class="editor-scroll-area" id="editor-scroller">
+          <div id="code" contenteditable="true" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PREVIEW VIEW -->
+    <div id="view-preview" class="view">
+      <div class="preview-wrap">
+        <div class="preview-bar">
+          <span>Sandbox Environment</span>
+          <span style="margin-left: auto" id="preview-size">0 KB</span>
+        </div>
+        <iframe id="preview-frame" class="preview" sandbox="allow-scripts allow-modals allow-forms allow-same-origin"></iframe>
+      </div>
+    </div>
+
+    <!-- ASSETS VIEW -->
+    <div id="view-assets" class="view assets-view">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3>Media Library</h3>
+        <button class="chip" onclick="document.getElementById('hidden-input').click()">+ Upload File</button>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-bottom:12px;">Files are stored locally in your browser.</div>
+      <div id="asset-list" class="asset-grid">
+        <!-- Assets injected here -->
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Global File Input -->
+<input type="file" id="hidden-input" multiple />
+
+<!-- Toast Notification -->
+<div id="toast" class="toast">
+  <i data-feather="check-circle" width="16" color="#63e6ff"></i>
+  <span id="toast-msg">Saved successfully</span>
+</div>
+
+<!-- Mobile Toolbar -->
+<div class="toolbar-bottom">
+  <div class="toolbar-grid">
+    <button class="tb-btn" id="btn-open">
+      <span class="tb-icon">📂</span>
+      <span>Open</span>
+    </button>
+    <button class="tb-btn" id="btn-save">
+      <span class="tb-icon">💾</span>
+      <span>Save</span>
+    </button>
+    <button class="tb-btn primary" id="btn-run">
+      <span class="tb-icon">▶️</span>
+      <span>Run</span>
+    </button>
+    <button class="tb-btn" id="btn-export">
+      <span class="tb-icon">📤</span>
+      <span>Export</span>
+    </button>
+  </div>
+</div>
+
+<script>
+  // Initialize Feather Icons
+  feather.replace();
+
+  // --- GLOBALS & STATE ---
+  const STORAGE_KEY = 'nebula_pro_code';
+  const ASSETS_KEY = 'nebula_pro_assets';
+  const XP_KEY = 'nebula_pro_xp';
+  
+  // DOM Elements
+  const elCode = document.getElementById('code');
+  const elGutter = document.getElementById('gutter');
+  const elScroller = document.getElementById('editor-scroller');
+  const elPreviewFrame = document.getElementById('preview-frame');
+  const elToast = document.getElementById('toast');
+  const elHiddenInput = document.getElementById('hidden-input');
+  
+  // State
+  let objectUrls = [];
+  let currentXP = 0;
+
+  // --- INITIALIZATION ---
+  (async function init() {
+    // Load IDB
+    const { get, set } = idbKeyval;
+
+    // Load Code
+    const savedCode = await get(STORAGE_KEY);
+    elCode.innerText = savedCode || getDefaultTemplate();
+    updateGutter();
+
+    // Load XP
+    const savedXP = await get(XP_KEY);
+    if(savedXP) { currentXP = savedXP; updateXPDisplay(); }
+
+    // Load Assets
+    loadAssetsRender();
+
+    // Event Listeners
+    setupEditorEvents();
+    setupTabs();
+    setupButtons();
+  })();
+
+  function getDefaultTemplate() {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Nebula Project</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 { color: #6366f1; }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>Hello, Nebula! 🚀</h1>
+    <p>Edit the code and hit <b>Run</b> to see changes.</p>
+  </div>
+
+  <script>
+    console.log("Nebula is ready!");
+  <\/script>
+
+</body>
+</html>`;
+  }
+
+  // --- EDITOR LOGIC ---
+
+  function setupEditorEvents() {
+    // 1. Gutter Sync
+    elScroller.addEventListener('scroll', () => {
+      elGutter.scrollTop = elScroller.scrollTop;
+    });
+
+    // 2. Input Handling
+    elCode.addEventListener('input', () => {
+      updateGutter();
+      debounceSave();
+    });
+
+    // 3. Tab Key Support
+    elCode.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        document.execCommand('insertText', false, '  ');
+      }
+      // Prevent creating <div> on Enter, use \n instead
+      if (e.key === 'Enter') {
+        // Let browser handle it but ensure we clean up later if needed
+        // ContentEditable quirks are endless, but modern browsers handle <br> or \n decently in <pre>
+      }
+    });
+  }
+
+  function updateGutter() {
+    const text = elCode.innerText;
+    const lineCount = text.split('\n').length;
+    elGutter.innerHTML = Array(lineCount).fill(0).map((_, i) => i + 1).join('<br>');
+  }
+
+  let saveTimeout;
+  function debounceSave() {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      await idbKeyval.set(STORAGE_KEY, elCode.innerText);
+      // showToast('Autosaved'); // Optional: too many toasts can be annoying
+    }, 1000);
+  }
+
+  // --- TABS LOGIC ---
+
+  function setupTabs() {
+    const tabs = document.querySelectorAll('.tab');
+    const views = document.querySelectorAll('.view');
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        // Deactivate all
+        tabs.forEach(t => t.classList.remove('active'));
+        views.forEach(v => v.classList.remove('active'));
+
+        // Activate clicked
+        tab.classList.add('active');
+        const targetId = `view-${tab.dataset.target}`;
+        document.getElementById(targetId).classList.add('active');
+
+        // Special actions
+        if (tab.dataset.target === 'preview') {
+          // If switching to preview via tab, maybe update? 
+          // Optional: We can auto-run or wait for explicit Run button.
+          // Let's not auto-run to save performance on mobile.
+        }
+      });
+    });
+  }
+
+  // --- BUTTON ACTIONS ---
+
+  function setupButtons() {
+    // Run / Preview
+    document.getElementById('btn-run').addEventListener('click', () => {
+      runPreview();
+      // Switch to preview tab
+      document.querySelector('[data-target="preview"]').click();
+      addXP(5);
+    });
+
+    // Save
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      await idbKeyval.set(STORAGE_KEY, elCode.innerText);
+      showToast('Project Saved!');
+      addXP(2);
+    });
+
+    // Export
+    document.getElementById('btn-export').addEventListener('click', () => {
+      const blob = new Blob([elCode.innerText], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'nebula-project.html';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Exported HTML');
+      addXP(10);
+    });
+
+    // Open
+    document.getElementById('btn-open').addEventListener('click', () => {
+      // Create a temp input for opening files specifically
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.html,.htm,.txt';
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          elCode.innerText = ev.target.result;
+          updateGutter();
+          await idbKeyval.set(STORAGE_KEY, elCode.innerText);
+          showToast('File Loaded');
+          // Switch to editor
+          document.querySelector('[data-target="editor"]').click();
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    });
+
+    // Asset Upload (Hidden Input)
+    elHiddenInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      if(files.length === 0) return;
+
+      const currentAssets = (await idbKeyval.get(ASSETS_KEY)) || [];
+      
+      for (const file of files) {
+        // Convert to ArrayBuffer for storage
+        const buffer = await file.arrayBuffer();
+        const asset = {
+          id: crypto.randomUUID(),
+          name: file.name,
+          type: file.type,
+          data: buffer,
+          created: Date.now()
+        };
+        currentAssets.unshift(asset);
+      }
+
+      await idbKeyval.set(ASSETS_KEY, currentAssets);
+      loadAssetsRender();
+      showToast(`${files.length} Asset(s) Added`);
+      addXP(10 * files.length);
+      
+      // Clear input
+      elHiddenInput.value = '';
+    });
+  }
+
+  // --- PREVIEW SYSTEM ---
+
+  async function runPreview() {
+    const rawCode = elCode.innerText;
+    
+    // Process assets injection
+    // We need to replace any local asset references with Blob URLs
+    let processedCode = rawCode;
+    
+    const assets = (await idbKeyval.get(ASSETS_KEY)) || [];
+    
+    // Revoke old URLs
+    objectUrls.forEach(url => URL.revokeObjectURL(url));
+    objectUrls = [];
+
+    // Create a map of filename -> Blob URL
+    // This allows users to write <img src="myimage.png"> and it works!
+    for (const asset of assets) {
+      const blob = new Blob([asset.data], { type: asset.type });
+      const url = URL.createObjectURL(blob);
+      objectUrls.push(url);
+      
+      // Simple string replacement (global)
+      // Regex safeguards could be added, but simple string replace is fast
+      const regex = new RegExp(escapeRegExp(asset.name), 'g');
+      processedCode = processedCode.replace(regex, url);
+    }
+
+    // Update Frame
+    elPreviewFrame.srcdoc = processedCode;
+    
+    // Update Size info
+    const sizeKB = (new Blob([processedCode]).size / 1024).toFixed(2);
+    document.getElementById('preview-size').innerText = `${sizeKB} KB`;
+  }
+
+  // --- ASSETS SYSTEM ---
+
+  async function loadAssetsRender() {
+    const assets = (await idbKeyval.get(ASSETS_KEY)) || [];
+    const container = document.getElementById('asset-list');
+    container.innerHTML = '';
+
+    if (assets.length === 0) {
+      container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--muted); grid-column:1/-1;">No assets yet. Upload images, scripts, or styles to use them in your HTML.</div>`;
+      return;
+    }
+
+    assets.forEach(asset => {
+      // Create Object URL for thumbnail
+      const blob = new Blob([asset.data], { type: asset.type });
+      const url = URL.createObjectURL(blob);
+      
+      const el = document.createElement('div');
+      el.className = 'asset-card';
+      
+      let thumbContent = '';
+      if (asset.type.startsWith('image/')) {
+        thumbContent = `<img src="${url}" style="width:100%; height:100%; object-fit:cover;">`;
+      } else {
+        thumbContent = `<span>📄</span>`;
+      }
+
+      el.innerHTML = `
+        <div class="asset-thumb">${thumbContent}</div>
+        <div class="asset-info">
+          <div class="asset-name" title="${asset.name}">${asset.name}</div>
+          <div class="asset-meta">${(asset.data.byteLength / 1024).toFixed(1)} KB • ${asset.type}</div>
+          <div class="asset-actions">
+            <div class="chip" data-action="insert" data-name="${asset.name}" data-type="${asset.type}">Insert</div>
+            <div class="chip" data-action="delete" data-id="${asset.id}" style="color:#ff7b72; border-color:rgba(255,123,114,0.2)">Delete</div>
+          </div>
+        </div>
+      `;
+
+      // Event Delegation for buttons within card
+      el.querySelector('[data-action="insert"]').onclick = () => insertAssetTag(asset.name, asset.type);
+      el.querySelector('[data-action="delete"]').onclick = () => deleteAsset(asset.id);
+
+      container.appendChild(el);
+    });
+  }
+
+  function insertAssetTag(filename, type) {
+    let tag = '';
+    if (type.startsWith('image/')) {
+      tag = `<img src="${filename}" alt="Image" width="200">`;
+    } else if (type.startsWith('audio/')) {
+      tag = `<audio controls src="${filename}"></audio>`;
+    } else if (type.startsWith('video/')) {
+      tag = `<video controls width="300" src="${filename}"></video>`;
+    } else if (type === 'text/css') {
+      tag = `<link rel="stylesheet" href="${filename}">`;
+    } else if (type === 'text/javascript' || type === 'application/javascript') {
+      tag = `<script src="${filename}"><\/script>`;
+    } else {
+      tag = `<a href="${filename}">${filename}</a>`;
+    }
+
+    // Insert at cursor or append
+    document.querySelector('[data-target="editor"]').click(); // Switch view
+    
+    setTimeout(() => {
+      elCode.focus();
+      document.execCommand('insertHTML', false, tag);
+      debounceSave();
+      showToast('Tag Inserted');
+    }, 100);
+  }
+
+  async function deleteAsset(id) {
+    if(!confirm("Delete this asset?")) return;
+    const assets = await idbKeyval.get(ASSETS_KEY);
+    const newAssets = assets.filter(a => a.id !== id);
+    await idbKeyval.set(ASSETS_KEY, newAssets);
+    loadAssetsRender();
+    showToast('Asset Deleted');
+  }
+
+  // --- GAMIFICATION ---
+
+  function addXP(amount) {
+    currentXP += amount;
+    updateXPDisplay();
+    idbKeyval.set(XP_KEY, currentXP);
+  }
+
+  function updateXPDisplay() {
+    const level = Math.floor(currentXP / 100) + 1;
+    document.getElementById('xp-display').innerText = `Lvl ${level} • ${currentXP} XP`;
+  }
+
+  // --- UTILS ---
+
+  function showToast(msg) {
+    document.getElementById('toast-msg').innerText = msg;
+    elToast.classList.add('show');
+    setTimeout(() => elToast.classList.remove('show'), 2000);
+  }
+
+  function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+</script>
+</body>
+</html>
+
